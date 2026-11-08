@@ -280,7 +280,10 @@
     </div>
     <div class="hint" id="hint">轻点歌词可以跳到那一句</div>
   </div>
+
 </div>
+
+<audio id="bgm" src="bgm.mp3" preload="auto"></audio>
 
 <script>
 (function () {
@@ -292,11 +295,11 @@
   var HINT = "轻点歌词可以跳到那一句";
 
   // 原文逐行照搬，空字符串表示段落间的停顿（只走时间，不显示歌词）。
-  // 想配歌的话，把下面的时长改成对应时间戳即可，其余逻辑不用动。
   var RAW = [
     ["", 1.4],
     ["诶诶诶", 2.8],
     ["你竟然扫描了这个二维码", 4.2],
+    ["其实这不是歌词哦", 3.6],
     ["", 2.6],
     ["我猜", 2.8],
     ["你今天特别想听到那四个字", 4.4],
@@ -317,11 +320,11 @@
     ["身不由己……", 3.6],
     ["行间太密，", 3.2],
     ["心事难藏……", 4.4],
+    ["嘻嘻……", 2.8],
     ["", 3.6]
   ];
 
   // 全篇总时长；想再快或再慢只改这一个数，各行与停顿会等比缩放。
-  // 配歌时把它设成歌曲长度，并把 RAW 里的时长改成对应的绝对秒数。
   var TARGET_SECONDS = 45;
   var rawTotal = 0;
   for (var r = 0; r < RAW.length; r++) rawTotal += RAW[r][1];
@@ -349,6 +352,7 @@
   var barWrap  = document.getElementById("barWrap");
   var hintEl   = document.getElementById("hint");
   var stars    = document.getElementById("stars");
+  var audio    = document.getElementById("bgm");
 
   var rowEls = [];
   for (var j = 0; j < lines.length; j++) {
@@ -365,6 +369,7 @@
         hintEl.textContent = HINT;
         updateButton();
         render(elapsed, true);
+        syncAudio();
       });
       inner.appendChild(el);
       rowEls.push(el);
@@ -390,7 +395,10 @@
   // 调试用：index.html?w=390 可把舞台固定成指定宽度，在桌面预览窄屏效果。
   var widthParam = parseFloat((window.location.search.match(/[?&]w=(\d+)/) || [])[1]);
   if (widthParam > 0) stage.style.width = widthParam + "px";
-  var playing = true;
+
+  // iOS 不允许自动播放音频，由底部播放键启动；歌词先静止等她按下去。
+  var playing = false;
+  var started = false;
   var isEnded = false;
   var dragging = false;
   var lastTs = 0;
@@ -451,6 +459,31 @@
     playBtn.innerHTML = isEnded ? ICON_REPLAY : (playing ? ICON_PAUSE : ICON_PLAY);
   }
 
+  // 音乐比歌词短，最后几秒是留给文字的静默。
+  function audioDuration() {
+    return (audio && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : 40.81;
+  }
+
+  function startPlayback() {
+    try {
+      var p = audio.play();
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {}
+  }
+
+  function playAudio() {
+    if (!started || !audio || elapsed >= audioDuration()) return;
+    try { audio.currentTime = Math.max(0, elapsed); } catch (e) {}
+    startPlayback();
+  }
+
+  function syncAudio() {
+    if (!started || !audio) return;
+    if (elapsed >= audioDuration()) { audio.pause(); return; }
+    try { audio.currentTime = Math.max(0, elapsed); } catch (e) {}
+    if (playing) startPlayback();
+  }
+
   function seek(x) {
     var rect = barWrap.getBoundingClientRect();
     var ratio = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
@@ -465,14 +498,25 @@
     if (isEnded) {
       elapsed = 0;
       isEnded = false;
+      started = true;
       playing = true;
       hintEl.textContent = HINT;
       updateButton();
       render(elapsed, true);
+      playAudio();
+      return;
+    }
+    if (!started) {
+      started = true;
+      playing = true;
+      updateButton();
+      playAudio();
       return;
     }
     playing = !playing;
     updateButton();
+    if (playing) playAudio();
+    else if (audio) audio.pause();
   });
 
   prevBtn.addEventListener("click", function () {
@@ -483,6 +527,7 @@
     hintEl.textContent = HINT;
     updateButton();
     render(elapsed, true);
+    syncAudio();
   });
 
   nextBtn.addEventListener("click", function () {
@@ -492,6 +537,7 @@
     hintEl.textContent = HINT;
     updateButton();
     render(elapsed, true);
+    syncAudio();
   });
 
   barWrap.addEventListener("touchstart", function (e) {
@@ -502,11 +548,11 @@
   barWrap.addEventListener("touchmove", function (e) {
     if (dragging) { seek(e.touches[0].clientX); e.preventDefault(); }
   }, { passive: false });
-  barWrap.addEventListener("touchend", function () { dragging = false; }, { passive: true });
-  barWrap.addEventListener("touchcancel", function () { dragging = false; }, { passive: true });
+  barWrap.addEventListener("touchend", function () { dragging = false; syncAudio(); }, { passive: true });
+  barWrap.addEventListener("touchcancel", function () { dragging = false; syncAudio(); }, { passive: true });
   barWrap.addEventListener("mousedown", function (e) { dragging = true; seek(e.clientX); });
   window.addEventListener("mousemove", function (e) { if (dragging) seek(e.clientX); });
-  window.addEventListener("mouseup", function () { dragging = false; });
+  window.addEventListener("mouseup", function () { if (dragging) { dragging = false; syncAudio(); } });
 
   window.addEventListener("resize", layout);
   window.addEventListener("orientationchange", function () { setTimeout(layout, 220); });
